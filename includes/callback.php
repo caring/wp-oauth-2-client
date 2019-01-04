@@ -28,7 +28,7 @@ if ( ! isset( $_GET['code'] ) ) {
 		'redirect_uri'  => site_url( '?auth=sso' )
 	);
 	$params = http_build_query( $params );
-	wp_redirect( $options['server_url'] . '?' . $params );
+	wp_redirect( $options['server_url'] . '/oauth/authorize?' . $params );
 	exit;
 }
 
@@ -36,7 +36,7 @@ if ( ! isset( $_GET['code'] ) ) {
 if ( isset( $_GET['code'] ) && ! empty( $_GET['code'] ) ) {
 
 	$code       = sanitize_text_field( $_GET['code'] );
-	$server_url = $options['server_url'] . '?oauth=token';
+	$server_url = $options['server_url'] . '/oauth/token?oauth=token';
 	$response   = wp_remote_post( $server_url, array(
 		'method'      => 'POST',
 		'timeout'     => 45,
@@ -55,13 +55,17 @@ if ( isset( $_GET['code'] ) && ! empty( $_GET['code'] ) ) {
 		'sslverify'   => false
 	) );
 
+	if ( is_wp_error( $response ) ) {
+		wp_die( $response->get_error_message() );
+	}
+
 	$tokens = json_decode( $response['body'] );
 
 	if ( isset( $tokens->error ) ) {
 		wp_die( $tokens->error_description );
 	}
 
-	$server_url = $options['server_url'] . '?oauth=me&access_token=' . $tokens->access_token;
+	$server_url = $options['server_url'] . '/api/v3/accounts/me.json?oauth=me&access_token=' . $tokens->access_token;
 	$response   = wp_remote_get( $server_url, array(
 		'timeout'     => 45,
 		'redirection' => 5,
@@ -72,12 +76,11 @@ if ( isset( $_GET['code'] ) && ! empty( $_GET['code'] ) ) {
 	) );
 
 	$user_info = json_decode( $response['body'] );
-	$user_id   = username_exists( $user_info->user_login );
-	if ( ! $user_id && email_exists( $user_info->user_email ) == false ) {
+	if ( email_exists( $user_info->account->email ) == false ) {
 
 		// Does not have an account... Register and then log the user in
 		$random_password = wp_generate_password( $length = 12, $include_standard_special_chars = false );
-		$user_id         = wp_create_user( $user_info->user_login, $random_password, $user_info->user_email );
+		$user_id         = wp_create_user( $user_info->account->full_name, $random_password, $user_info->account->email );
 
 		// Trigger new user created action so that there can be modifications to what happens after the user is created.
 		// This can be used to collect other information about the user.
@@ -96,7 +99,7 @@ if ( isset( $_GET['code'] ) && ! empty( $_GET['code'] ) ) {
 
 		// Already Registered... Log the User In
 		$random_password = __( 'User already exists.  Password inherited.' );
-		$user            = get_user_by( 'login', $user_info->user_login );
+		$user            = get_user_by( 'email', $user_info->account->email );
 
 
 		// Trigger action when a user is logged in. This will help allow extensions to be used without modifying the
